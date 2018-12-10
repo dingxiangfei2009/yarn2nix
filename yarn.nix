@@ -1,9 +1,9 @@
-{fetchurl, linkFarm}: rec {
+{fetchgitTarball, fetchurl, linkFarm}: rec {
   offline_cache = linkFarm "offline" packages;
   packages = [
 
     {
-      name = "_yarnpkg_lockfile___lockfile_1.1.0.tgz";
+      name = "@yarnpkg-lockfile-1.1.0.tgz";
       path = fetchurl {
         name = "_yarnpkg_lockfile___lockfile_1.1.0.tgz";
         url  = "https://registry.yarnpkg.com/@yarnpkg/lockfile/-/lockfile-1.1.0.tgz";
@@ -12,7 +12,7 @@
     }
 
     {
-      name = "deep_equal___deep_equal_1.0.1.tgz";
+      name = "deep-equal-1.0.1.tgz";
       path = fetchurl {
         name = "deep_equal___deep_equal_1.0.1.tgz";
         url  = "https://registry.yarnpkg.com/deep-equal/-/deep-equal-1.0.1.tgz";
@@ -21,7 +21,7 @@
     }
 
     {
-      name = "docopt___docopt_0.6.2.tgz";
+      name = "docopt-0.6.2.tgz";
       path = fetchurl {
         name = "docopt___docopt_0.6.2.tgz";
         url  = "https://registry.yarnpkg.com/docopt/-/docopt-0.6.2.tgz";

@@ -4,7 +4,7 @@
 }:
 
 let
-  inherit (pkgs) stdenv lib fetchurl linkFarm;
+  inherit (pkgs) stdenv lib cacert git fetchgit fetchurl linkFarm gnutar gzip runCommand;
 in rec {
   # Export yarn again to make it easier to find out which yarn was used.
   inherit yarn;
@@ -46,7 +46,23 @@ in rec {
   # the package source.
   importOfflineCache = yarnNix:
     let
-      pkg = import yarnNix { inherit fetchurl linkFarm; };
+      fetchgitTarball =
+        name:
+        args:
+        let
+          src = fetchgit args;
+        in
+        runCommand
+          "${name}-source-tarball"
+          {
+            inherit src;
+            nativeBuildInputs = [ gnutar gzip ];
+          }
+          ''
+            ln -s $src package
+            tar chH posix --mode='u+rw' -f $out package
+          '';
+      pkg = import yarnNix { inherit fetchgitTarball fetchurl linkFarm; };
     in
       pkg.offline_cache;
 
@@ -68,6 +84,7 @@ in rec {
     pkgConfig ? {},
     preBuild ? "",
     workspaceDependencies ? [],
+    workspaceJSON ? { private = true; workspaces = ["deps/**"]; },
   }:
     let
       offlineCache = importOfflineCache yarnNix;
@@ -84,9 +101,9 @@ in rec {
         else
           ""
       ) (builtins.attrNames pkgConfig));
-      workspaceJSON = pkgs.writeText
+      workspaceJSONText = pkgs.writeText
         "${name}-workspace-package.json"
-        (builtins.toJSON { private = true; workspaces = ["deps/**"]; }); # scoped packages need second splat
+        (builtins.toJSON workspaceJSON); # scoped packages need second splat
       workspaceDependencyLinks = lib.concatMapStringsSep "\n"
         (dep: ''
           mkdir -p "deps/${dep.pname}"
@@ -96,7 +113,7 @@ in rec {
     in stdenv.mkDerivation {
       inherit preBuild name;
       phases = ["configurePhase" "buildPhase"];
-      buildInputs = [ yarn nodejs ] ++ extraBuildInputs;
+      buildInputs = [ yarn nodejs git cacert ] ++ extraBuildInputs;
 
       configurePhase = ''
         # Yarn writes cache directories etc to $HOME.
@@ -108,7 +125,7 @@ in rec {
 
         mkdir -p "deps/${pname}"
         cp ${packageJSON} "deps/${pname}/package.json"
-        cp ${workspaceJSON} ./package.json
+        cp ${workspaceJSONText} ./package.json
         cp ${yarnLock} ./yarn.lock
         chmod +w ./yarn.lock
 
@@ -116,7 +133,7 @@ in rec {
 
         # Do not look up in the registry, but in the offline cache.
         # TODO: Ask upstream to fix this mess.
-        sed -i -E '/resolved /{s|https://registry.yarnpkg.com/||;s|[@/:-]|_|g}' yarn.lock
+        # sed -i -E '/resolved /{s|https://registry.yarnpkg.com/||;s|[@/:-]|_|g}' yarn.lock
 
         ${workspaceDependencyLinks}
         yarn install ${lib.escapeShellArgs yarnFlags}
@@ -195,6 +212,7 @@ in rec {
     extraBuildInputs ? [],
     publishBinsFor ? null,
     workspaceDependencies ? [],
+    workspaceJSON ? { private = true; workspaces = ["deps/**"]; },
     ...
   }@attrs:
     let
@@ -207,7 +225,7 @@ in rec {
         name = "${safeName}-modules-${version}";
         preBuild = yarnPreBuild;
         workspaceDependencies = workspaceDependenciesTransitive;
-        inherit packageJSON pname version yarnLock yarnNix yarnFlags pkgConfig;
+        inherit workspaceJSON packageJSON pname version yarnLock yarnNix yarnFlags pkgConfig ;
       };
       publishBinsFor_ = unlessNull publishBinsFor [pname];
       linkDirFunction = ''
@@ -247,6 +265,10 @@ in rec {
 
       node_modules = deps + "/node_modules";
 
+      workspaceJSONText = pkgs.writeText
+        "${name}-workspace-package.json"
+        (builtins.toJSON workspaceJSON);
+
       configurePhase = attrs.configurePhase or ''
         runHook preConfigure
 
@@ -268,6 +290,7 @@ in rec {
 
         ${linkDirFunction}
         linkDirToDirLinks "$(dirname node_modules/${pname})"
+        # TODO: this is not going to work, as `deps` is moved away later
         ln -s "deps/${pname}" "node_modules/${pname}"
         ${workspaceDependencyCopy}
 
@@ -284,6 +307,7 @@ in rec {
         mkdir -p $out/{bin,libexec/${pname}}
         mv node_modules $out/libexec/${pname}/node_modules
         mv deps $out/libexec/${pname}/deps
+        cp $workspaceJSONText $out/libexec/${pname}/package.json
         node ${./nix/fixup_bin.js} $out/bin $out/libexec/${pname}/node_modules ${lib.concatStringsSep " " publishBinsFor_}
 
         runHook postInstall
@@ -313,6 +337,7 @@ in rec {
     });
 
   yarn2nix = mkYarnPackage {
+    name = "yarn2nix";
     src = ./.;
     # yarn2nix is the only package that requires the yarnNix option.
     # All the other projects can auto-generate that file.
